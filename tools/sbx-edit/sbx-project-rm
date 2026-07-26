@@ -1,0 +1,36 @@
+#!/bin/bash
+# Usage: claude-remove <project_name>
+
+# Exit immediately if a command exits with a non-zero status
+set -e
+
+PROJECT_NAME=$1
+
+# --- Empty CLI Argument Defense ---
+if [ -z "$PROJECT_NAME" ]; then
+    echo "Error: Missing project name argument." >&2
+    echo "Usage: $0 <project_name>" >&2
+    exit 1
+fi
+
+USER_NAME="sbx-$PROJECT_NAME"
+
+# Check if the user actually exists
+if id -u "$USER_NAME" > /dev/null 2>&1; then
+    echo "Terminating any background processes for $USER_NAME..."
+    # pkill gracefully kills all processes owned by the user. 
+    # The '|| true' ensures the script doesn't crash if no processes are currently running.
+    sudo pkill -u "$USER_NAME" || true 
+    
+    # Wait a brief moment to let processes shut down cleanly
+    sleep 2 
+    
+    # The -r flag is the magic bullet: it deletes the user AND recursively wipes their home directory
+    echo "Removing user and purging workspace directory..."
+    sudo userdel -r "$USER_NAME"
+    
+    echo "Environment for $PROJECT_NAME has been completely purged from the system."
+else
+    echo "Error: Isolated environment for $PROJECT_NAME does not exist." >&2
+    exit 1
+fi

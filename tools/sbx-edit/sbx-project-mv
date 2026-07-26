@@ -1,0 +1,43 @@
+#!/bin/bash
+# Usage: claude-mv <old_project_name> <new_project_name>
+
+set -e
+
+OLD_PROJECT=$1
+NEW_PROJECT=$2
+
+# --- Empty CLI Argument Defense ---
+if [ -z "$OLD_PROJECT" ] || [ -z "$NEW_PROJECT" ]; then
+    echo "Error: Missing arguments." >&2
+    echo "Usage: $0 <old_project_name> <new_project_name>" >&2
+    exit 1
+fi
+
+OLD_USER="sbx-$OLD_PROJECT"
+NEW_USER="sbx-$NEW_PROJECT"
+
+# --- Safety Checks ---
+if ! id -u "$OLD_USER" > /dev/null 2>&1; then
+    echo "Error: Source environment '$OLD_PROJECT' does not exist." >&2
+    exit 1
+fi
+
+if id -u "$NEW_USER" > /dev/null 2>&1; then
+    echo "Error: Target environment name '$NEW_PROJECT' is already taken." >&2
+    exit 1
+fi
+
+echo "Stopping any active processes for $OLD_USER..."
+sudo pkill -u "$OLD_USER" || true
+sleep 1
+
+echo "Renaming group from $OLD_USER to $NEW_USER..."
+sudo groupmod -n "$NEW_USER" "$OLD_USER"
+
+echo "Renaming user and moving home directory..."
+# -l renames the login name
+# -d changes the home directory path
+# -m moves the contents of the old home folder to the new one
+sudo usermod -l "$NEW_USER" -d "/home/$NEW_USER" -m "$OLD_USER"
+
+echo "Success! Environment '$OLD_PROJECT' has been renamed to '$NEW_PROJECT'."

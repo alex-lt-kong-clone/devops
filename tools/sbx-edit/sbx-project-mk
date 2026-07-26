@@ -1,0 +1,46 @@
+#!/bin/bash
+# Usage: claude-project <project_name>
+
+set -e
+
+# ==========================================
+# CONFIGURATION (Define everything in one place)
+# ==========================================
+PROJECT_NAME=$1
+VM_IP=sbx-de.hs.mamsds.com"  # <-- Change this to your VM's IP address once
+ADMIN_USER="root"   # <-- The user account you currently use to SSH (e.g., root, ubuntu, debian)
+
+# --- Empty CLI Argument Defense ---
+if [ -z "$PROJECT_NAME" ]; then
+    echo "Error: Missing project name argument." >&2
+    echo "Usage: $0 <project_name>" >&2
+    exit 1
+fi
+
+USER_NAME="sbx-$PROJECT_NAME"
+PROJECT_DIR="/home/$USER_NAME/repos"
+
+# --- Dynamically Resolve Admin's Home Directory (Fixes the /home/root bug) ---
+ADMIN_HOME=$(getent passwd "$ADMIN_USER" | cut -d: -f6)
+
+# --- Idempotency Check ---
+if id -u "$USER_NAME" > /dev/null 2>&1; then
+    echo "Environment for '$PROJECT_NAME' already exists and is configured."
+    echo "To connect VS Code, use: ssh $USER_NAME@$VM_IP"
+    exit 0
+fi
+
+# --- Creation Steps ---
+sudo useradd -m -s /bin/bash "$USER_NAME"
+sudo -u "$USER_NAME" mkdir -p "$PROJECT_DIR"
+
+# Set up SSH access safely using the dynamically resolved admin home
+sudo -u "$USER_NAME" mkdir -p "/home/$USER_NAME/.ssh"
+sudo chmod 700 "/home/$USER_NAME/.ssh"
+
+sudo cp "$ADMIN_HOME/.ssh/authorized_keys" "/home/$USER_NAME/.ssh/authorized_keys"
+sudo chown "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.ssh/authorized_keys"
+sudo chmod 600 "/home/$USER_NAME/.ssh/authorized_keys"
+
+echo "Created isolated environment for $PROJECT_NAME"
+echo "Environment ready! To connect VS Code, use: ssh $USER_NAME@$VM_IP"
