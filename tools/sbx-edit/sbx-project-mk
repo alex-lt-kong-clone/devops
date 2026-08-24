@@ -1,46 +1,36 @@
 #!/bin/bash
-# Usage: claude-project <project_name>
+# Usage: sbx-project-mk <project_name>
+#
+# Strict mode: -e stops on the first failed command (but not inside `if` or
+# `&&`/`||` tests), -u errors on unset variables, -o pipefail lets a failure
+# anywhere in a pipeline count. Append `|| true` to let a command fail on purpose.
+set -euo pipefail
 
-set -e
+ADMIN_USER="root"              # <-- the account you currently SSH in as
 
-# ==========================================
-# CONFIGURATION (Define everything in one place)
-# ==========================================
-PROJECT_NAME=$1
-VM_IP=sbx-de.hs.mamsds.com"  # <-- Change this to your VM's IP address once
-ADMIN_USER="root"   # <-- The user account you currently use to SSH (e.g., root, ubuntu, debian)
+die() { echo "Error: $*" >&2; exit 1; }
 
-# --- Empty CLI Argument Defense ---
-if [ -z "$PROJECT_NAME" ]; then
-    echo "Error: Missing project name argument." >&2
-    echo "Usage: $0 <project_name>" >&2
-    exit 1
-fi
+# Name flows into a username and a path, so keep it strict.
+PROJECT_NAME="${1:-}"
+[[ "$PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] \
+    || die "project name must be lowercase alphanumeric, - or _. Usage: $0 <project_name>"
 
 USER_NAME="sbx-$PROJECT_NAME"
-PROJECT_DIR="/home/$USER_NAME/repos"
+USER_HOME="/home/$USER_NAME"
 
-# --- Dynamically Resolve Admin's Home Directory (Fixes the /home/root bug) ---
-ADMIN_HOME=$(getent passwd "$ADMIN_USER" | cut -d: -f6)
+# getent, not /home/$ADMIN_USER, which is wrong for root.
+ADMIN_HOME=$(getent passwd "$ADMIN_USER" | cut -d: -f6) || die "unknown admin user '$ADMIN_USER'"
+ADMIN_KEYS="$ADMIN_HOME/.ssh/authorized_keys"
+[ -n "$ADMIN_HOME" ] && [ -f "$ADMIN_KEYS" ] || die "no authorized_keys for '$ADMIN_USER'"
 
-# --- Idempotency Check ---
-if id -u "$USER_NAME" > /dev/null 2>&1; then
-    echo "Environment for '$PROJECT_NAME' already exists and is configured."
-    echo "To connect VS Code, use: ssh $USER_NAME@$VM_IP"
-    exit 0
+if id -u "$USER_NAME" &>/dev/null; then
+    echo "Environment for '$PROJECT_NAME' already exists."
+else
+    sudo useradd -m -s /bin/bash "$USER_NAME"
+    sudo -u "$USER_NAME" mkdir -p "$USER_HOME/repos"
+    # install does mkdir/cp + chown + chmod in a single step.
+    sudo install -d -o "$USER_NAME" -g "$USER_NAME" -m 700 "$USER_HOME/.ssh"
+    sudo install    -o "$USER_NAME" -g "$USER_NAME" -m 600 "$ADMIN_KEYS" "$USER_HOME/.ssh/authorized_keys"
+    echo "Created isolated environment for $PROJECT_NAME"
 fi
 
-# --- Creation Steps ---
-sudo useradd -m -s /bin/bash "$USER_NAME"
-sudo -u "$USER_NAME" mkdir -p "$PROJECT_DIR"
-
-# Set up SSH access safely using the dynamically resolved admin home
-sudo -u "$USER_NAME" mkdir -p "/home/$USER_NAME/.ssh"
-sudo chmod 700 "/home/$USER_NAME/.ssh"
-
-sudo cp "$ADMIN_HOME/.ssh/authorized_keys" "/home/$USER_NAME/.ssh/authorized_keys"
-sudo chown "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.ssh/authorized_keys"
-sudo chmod 600 "/home/$USER_NAME/.ssh/authorized_keys"
-
-echo "Created isolated environment for $PROJECT_NAME"
-echo "Environment ready! To connect VS Code, use: ssh $USER_NAME@$VM_IP"
