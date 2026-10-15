@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """fj: run a program in a firejail sandbox built from the dicts below.
-Usage: cd ~/some/project && fj <program> [args...]     (FJ_DRYRUN=1 to print only)
+Usage: cd ~/some/project && fj [--dry-run] <program> [args...]
+       --dry-run prints the firejail command instead of running it
 """
 import os, shlex, sys
 
@@ -8,7 +9,10 @@ FIREJAIL = "/usr/bin/firejail"  # absolute: a planted "firejail" on PATH can't r
 
 # Parent: rules every program gets.
 # True -> --flag      "x" -> --flag=x      {set} -> --flag=each item
-# "keepenv" is ours, not firejail's: env vars passed through (all others dropped).
+# Ours, not firejail's (never passed to it):
+#   "keepenv"      env vars passed through (all others dropped)
+#   "project-dir"  share the current dir read-write (with .git hooks/config read-only)
+#   "exec"         command to run instead of the program name
 BASE = {
     "quiet": True,  # no firejail status lines in the terminal or in piped output
     "caps.drop": "all", "noroot": True, "nogroups": True, "nonewprivs": True, "seccomp": True,
@@ -20,6 +24,7 @@ BASE = {
     "whitelist": {"~/.gitconfig", "~/.local/bin/uv"},
     "read-only": {"~/.gitconfig"},
     "keepenv": {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "TERM", "COLORTERM", "LANG", "TZ"},
+    "project-dir": True,
 }
 
 # Children: only what differs from BASE.
@@ -38,6 +43,20 @@ PROGRAMS = {
         "mkdir": {"~/.claude"},
         "whitelist+": {"~/.claude", "~/.claude.json", "~/.local/bin/claude", "~/.local/share/claude"},
         "read-only+": {"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"}
+    },
+    "wechat": {  # GUI app: its own private home instead of a project dir
+        "exec": "~/Applications/WeChatLinux_x86_64.AppImage",
+        "appimage": True,
+        "private": "~/sandboxes/wx",  # becomes its home; the rest of yours is invisible
+        "private-etc": "@x11,@tls-ca",
+        "project-dir": None,
+        "whitelist": None, "read-only": None,  # dev-tool paths; --private replaces home anyway
+        "blacklist": None,  # /run/user holds the Wayland, PipeWire/Pulse and D-Bus sockets
+        "dbus-user": None,  # input method (fcitx/ibus), tray icon, notifications
+        "nosound": None, "novideo": None, "no3d": None,  # calls, camera, GPU
+        "keepenv+": {"DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
+                     "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DBUS_SESSION_BUS_ADDRESS",
+                     "QT_IM_MODULE", "GTK_IM_MODULE", "XMODIFIERS", "LANGUAGE"},
     },
 }
 
@@ -66,19 +85,28 @@ def to_args(cfg):
     return args
 
 home, cwd = os.path.expanduser("~"), os.getcwd()
-if len(sys.argv) < 2 or sys.argv[1] not in PROGRAMS:
-    sys.exit(f"usage: fj <program> [args...]   programs: {', '.join(PROGRAMS)}")
-if not cwd.startswith(home + "/"):
-    sys.exit("fj: run from a project dir inside $HOME (not $HOME itself)")
+argv = sys.argv[1:]
+dry_run = argv[:1] == ["--dry-run"]  # only before the program name; later args are the program's
+if dry_run:
+    argv = argv[1:]
+if not argv or argv[0] not in PROGRAMS:
+    sys.exit(f"usage: fj [--dry-run] <program> [args...]   programs: {', '.join(PROGRAMS)}")
+name, args = argv[0], argv[1:]
 
-cfg = merge(BASE, PROGRAMS[sys.argv[1]])
-cfg["whitelist"] = cfg.get("whitelist", set()) | {cwd}
-cfg["read-only"] = cfg.get("read-only", set()) | {f"{cwd}/.git/hooks", f"{cwd}/.git/config"}
+cfg = merge(BASE, PROGRAMS[name])
+if cfg.pop("project-dir", False):
+    if not cwd.startswith(home + "/"):
+        sys.exit("fj: run from a project dir inside $HOME (not $HOME itself)")
+    cfg["whitelist"] = cfg.get("whitelist", set()) | {cwd}
+    cfg["read-only"] = cfg.get("read-only", set()) | {f"{cwd}/.git/hooks", f"{cwd}/.git/config"}
 keep = cfg.pop("keepenv", set())
 env = {k: v for k, v in os.environ.items() if k in keep or k.startswith("LC_")}
+prog = os.path.expanduser(cfg.pop("exec", name))
 
-cmd = [FIREJAIL, "--noprofile", *to_args(cfg), "--", *sys.argv[1:]]
-if os.environ.get("FJ_DRYRUN"):
+cmd = [FIREJAIL, "--noprofile", *to_args(cfg), "--", prog, *args]
+if dry_run:
     print(shlex.join(cmd))
 else:
     os.execve(FIREJAIL, cmd, env)
+
+
