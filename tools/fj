@@ -17,7 +17,7 @@ BASE = {
     "nosound": True, "no3d": True, "novideo": True, "nou2f": True,
     "dbus-user": "none", "dbus-system": "none",
     "blacklist": {"${RUNUSER}"},
-    "whitelist": {"~/.gitconfig"},
+    "whitelist": {"~/.gitconfig", "~/.local/bin/uv"},
     "read-only": {"~/.gitconfig"},
     "keepenv": {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "TERM", "COLORTERM", "LANG", "TZ"},
 }
