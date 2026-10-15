@@ -17,7 +17,7 @@ BASE = {
     "nosound": True, "no3d": True, "novideo": True, "nou2f": True,
     "dbus-user": "none", "dbus-system": "none",
     "blacklist": {"${RUNUSER}"},
-    "whitelist": {"~/.gitconfig"},
+    "whitelist": {"~/.gitconfig", "~/.local/bin/uv"},
     "read-only": {"~/.gitconfig"},
     "keepenv": {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "TERM", "COLORTERM", "LANG", "TZ"},
 }
@@ -33,6 +33,11 @@ PROGRAMS = {
         "whitelist+": OPENCODE_DIRS | {"~/.opencode/bin/opencode"},
         "read-only+": {"~/.opencode/bin/opencode"},
         "keepenv+": {"AWS_LITELLM_BASE_URL", "AWS_LITELLM_API_KEY"},  # used by opencode.jsonc
+    },
+    "claude": {  # Claude Code, native installer layout
+        "mkdir": {"~/.claude"},
+        "whitelist+": {"~/.claude", "~/.claude.json", "~/.local/bin/claude", "~/.local/share/claude"},
+        "read-only+": {"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"}
     },
 }
 
