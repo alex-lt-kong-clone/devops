@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""fj: run a program in a firejail sandbox built from the dicts below.
+Usage: cd ~/some/project && fj <program> [args...]     (FJ_DRYRUN=1 to print only)
+"""
+import os, shlex, sys
+
+FIREJAIL = "/usr/bin/firejail"  # absolute: a planted "firejail" on PATH can't replace it
+
+# Parent: rules every program gets.
+# True -> --flag      "x" -> --flag=x      {set} -> --flag=each item
+# "keepenv" is ours, not firejail's: env vars passed through (all others dropped).
+BASE = {
+    "quiet": True,  # no firejail status lines in the terminal or in piped output
+    "caps.drop": "all", "noroot": True, "nogroups": True, "nonewprivs": True, "seccomp": True,
+    "protocol": "unix,inet,inet6",  # socket types only; any destination is reachable
+    "private-tmp": True, "private-dev": True, "disable-mnt": True,
+    "nosound": True, "no3d": True, "novideo": True, "nou2f": True,
+    "dbus-user": "none", "dbus-system": "none",
+    "blacklist": {"${RUNUSER}"},
+    "whitelist": {"~/.gitconfig"},
+    "read-only": {"~/.gitconfig"},
+    "keepenv": {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "TERM", "COLORTERM", "LANG", "TZ"},
+}
+
+# Children: only what differs from BASE.
+#   "key": value   replace          "key": None    remove
+#   "key+": {...}  add to a set     "key-": {...}  remove from a set
+OPENCODE_DIRS = {"~/.config/opencode", "~/.local/share/opencode",
+                 "~/.local/state/opencode", "~/.cache/opencode"}
+PROGRAMS = {
+    "opencode": {
+        "mkdir": OPENCODE_DIRS,
+        "whitelist+": OPENCODE_DIRS | {"~/.opencode/bin/opencode"},
+        "read-only+": {"~/.opencode/bin/opencode"},
+        "keepenv+": {"AWS_LITELLM_BASE_URL", "AWS_LITELLM_API_KEY"},  # used by opencode.jsonc
+    },
+}
+
+def merge(base, child):
+    cfg = {k: set(v) if isinstance(v, set) else v for k, v in base.items()}
+    for key, val in child.items():
+        if key.endswith("+"):
+            cfg[key[:-1]] = cfg.get(key[:-1], set()) | val
+        elif key.endswith("-"):
+            cfg[key[:-1]] = cfg.get(key[:-1], set()) - val
+        elif val is None:
+            cfg.pop(key, None)
+        else:
+            cfg[key] = val
+    return cfg
+
+def to_args(cfg):
+    args = []
+    for key, val in cfg.items():
+        if val is True:
+            args.append(f"--{key}")
+        elif isinstance(val, set):
+            args += [f"--{key}={v}" for v in sorted(val)]
+        elif val not in (False, None):
+            args.append(f"--{key}={val}")
+    return args
+
+home, cwd = os.path.expanduser("~"), os.getcwd()
+if len(sys.argv) < 2 or sys.argv[1] not in PROGRAMS:
+    sys.exit(f"usage: fj <program> [args...]   programs: {', '.join(PROGRAMS)}")
+if not cwd.startswith(home + "/"):
+    sys.exit("fj: run from a project dir inside $HOME (not $HOME itself)")
+
+cfg = merge(BASE, PROGRAMS[sys.argv[1]])
+cfg["whitelist"] = cfg.get("whitelist", set()) | {cwd}
+cfg["read-only"] = cfg.get("read-only", set()) | {f"{cwd}/.git/hooks", f"{cwd}/.git/config"}
+keep = cfg.pop("keepenv", set())
+env = {k: v for k, v in os.environ.items() if k in keep or k.startswith("LC_")}
+
+cmd = [FIREJAIL, "--noprofile", *to_args(cfg), "--", *sys.argv[1:]]
+if os.environ.get("FJ_DRYRUN"):
+    print(shlex.join(cmd))
+else:
+    os.execve(FIREJAIL, cmd, env)
