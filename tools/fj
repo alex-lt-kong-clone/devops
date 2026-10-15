@@ -50,9 +50,24 @@ PROGRAMS = {
         "private": "~/sandboxes/wx",  # becomes its home; the rest of yours is invisible
         "private-etc": "@x11,@tls-ca",
         "project-dir": None,
-        "whitelist": None, "read-only": None,  # dev-tool paths; --private replaces home anyway
-        "blacklist": None,  # /run/user holds the Wayland, PipeWire/Pulse and D-Bus sockets
-        "dbus-user": None,  # input method (fcitx/ibus), tray icon, notifications
+        "read-only": None,  # dev-tool paths; --private replaces home anyway
+        # /run/user: only the display, sound and D-Bus sockets (and X auth files); the rest
+        # stays hidden, e.g. systemd/private, which can start programs outside the sandbox.
+        # A blacklist beats a whitelist, so the base ${RUNUSER} blacklist must go.
+        "blacklist": None,
+        "whitelist": {"${RUNUSER}/bus", "${RUNUSER}/wayland-*", "${RUNUSER}/pipewire-0",
+                      "${RUNUSER}/pulse/native", "${RUNUSER}/.mutter-Xwaylandauth.*",
+                      "${RUNUSER}/xauth_*"},
+        # Session bus through a filter: only these services are reachable. Unfiltered, the
+        # app could ask the systemd user manager (systemd-run --user) to run anything unsandboxed.
+        "dbus-user": "filter",
+        "dbus-user.talk": {"org.freedesktop.Notifications",   # notifications
+                           "org.kde.StatusNotifierWatcher",   # tray icon
+                           "org.freedesktop.portal.Fcitx",    # fcitx input: portal
+                           "org.fcitx.*"},  # fcitx input: org.fcitx.Fcitx, org.fcitx.Fcitx-<display>
+        # Tray icon: the app must claim org.kde.StatusNotifierItem-<pid>-<n>. Firejail only takes
+        # a trailing ".*" wildcard, so this is the narrowest rule that covers it.
+        "dbus-user.own": {"org.kde.*"},
         "nosound": None, "novideo": None, "no3d": None,  # calls, camera, GPU
         "keepenv+": {"DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
                      "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DBUS_SESSION_BUS_ADDRESS",
@@ -108,5 +123,4 @@ if dry_run:
     print(shlex.join(cmd))
 else:
     os.execve(FIREJAIL, cmd, env)
-
 
