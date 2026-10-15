@@ -34,6 +34,11 @@ PROGRAMS = {
         "read-only+": {"~/.opencode/bin/opencode"},
         "keepenv+": {"AWS_LITELLM_BASE_URL", "AWS_LITELLM_API_KEY"},  # used by opencode.jsonc
     },
+    "claude": {  # Claude Code, native installer layout
+        "mkdir": {"~/.claude"},
+        "whitelist+": {"~/.claude", "~/.claude.json", "~/.local/bin/claude", "~/.local/share/claude"},
+        "read-only+": {"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"}
+    },
 }
 
 def merge(base, child):
