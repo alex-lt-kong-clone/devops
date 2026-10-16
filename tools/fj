@@ -30,20 +30,22 @@ BASE = {
 # Children: only what differs from BASE.
 #   "key": value   replace          "key": None    remove
 #   "key+": {...}  add to a set     "key-": {...}  remove from a set
-OPENCODE_DIRS = {"~/.config/opencode", "~/.local/share/opencode",
-                 "~/.local/state/opencode", "~/.cache/opencode"}
+def agent(dirs, rw=(), ro=(), env=()):
+    dirs, rw, ro, env = set(dirs), set(rw), set(ro), set(env)
+    return {"mkdir": dirs, "whitelist+": dirs | rw | ro, "read-only+": ro, "keepenv+": env}
+
 PROGRAMS = {
-    "opencode": {
-        "mkdir": OPENCODE_DIRS,
-        "whitelist+": OPENCODE_DIRS | {"~/.opencode/bin/opencode"},
-        "read-only+": {"~/.opencode/bin/opencode"},
-        "keepenv+": {"AWS_LITELLM_BASE_URL", "AWS_LITELLM_API_KEY"},  # used by opencode.jsonc
-    },
-    "claude": {  # Claude Code, native installer layout
-        "mkdir": {"~/.claude"},
-        "whitelist+": {"~/.claude", "~/.claude.json", "~/.local/bin/claude", "~/.local/share/claude"},
-        "read-only+": {"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"}
-    },
+    "opencode": agent(
+        dirs={"~/.config/opencode", "~/.local/share/opencode",
+              "~/.local/state/opencode", "~/.cache/opencode"},
+        ro={"~/.opencode/bin/opencode"},
+        env={"AWS_LITELLM_BASE_URL", "AWS_LITELLM_API_KEY"},  # used by opencode.jsonc
+    ),
+    "claude": agent(  # Claude Code, native installer layout
+        dirs={"~/.claude"},
+        rw={"~/.claude.json"},
+        ro={"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"},
+    ),
     "wechat": {  # GUI app: its own private home instead of a project dir
         "exec": "~/Applications/WeChatLinux_x86_64.AppImage",
         "appimage": True,
