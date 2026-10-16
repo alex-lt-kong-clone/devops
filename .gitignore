@@ -3,6 +3,7 @@
 tools/es-data-collector/config.json
 settings.json
 status.json
+/tmp/
 
 #
 #
