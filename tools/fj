@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """fj: run a program in a firejail sandbox built from the dicts below.
-Usage: cd ~/some/project && fj <program> [args...]     (FJ_DRYRUN=1 to print only)
+Usage: cd ~/some/project && fj [--dry-run] <program> [args...]
+       --dry-run prints the firejail command instead of running it
 """
 import os, shlex, sys
 
@@ -8,7 +9,10 @@ FIREJAIL = "/usr/bin/firejail"  # absolute: a planted "firejail" on PATH can't r
 
 # Parent: rules every program gets.
 # True -> --flag      "x" -> --flag=x      {set} -> --flag=each item
-# "keepenv" is ours, not firejail's: env vars passed through (all others dropped).
+# Ours, not firejail's (never passed to it):
+#   "keepenv"      env vars passed through (all others dropped)
+#   "project-dir"  share the current dir read-write (with .git hooks/config read-only)
+#   "exec"         command to run instead of the program name
 BASE = {
     "quiet": True,  # no firejail status lines in the terminal or in piped output
     "caps.drop": "all", "noroot": True, "nogroups": True, "nonewprivs": True, "seccomp": True,
@@ -20,24 +24,60 @@ BASE = {
     "whitelist": {"~/.gitconfig", "~/.local/bin/uv"},
     "read-only": {"~/.gitconfig"},
     "keepenv": {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "TERM", "COLORTERM", "LANG", "TZ"},
+    "project-dir": True,
 }
 
 # Children: only what differs from BASE.
 #   "key": value   replace          "key": None    remove
 #   "key+": {...}  add to a set     "key-": {...}  remove from a set
-OPENCODE_DIRS = {"~/.config/opencode", "~/.local/share/opencode",
-                 "~/.local/state/opencode", "~/.cache/opencode"}
+def agent(dirs, rw=(), ro=(), env=()):
+    dirs, rw, ro, env = set(dirs), set(rw), set(ro), set(env)
+    return {"mkdir": dirs, "whitelist+": dirs | rw | ro, "read-only+": ro, "keepenv+": env}
+
 PROGRAMS = {
-    "opencode": {
-        "mkdir": OPENCODE_DIRS,
-        "whitelist+": OPENCODE_DIRS | {"~/.opencode/bin/opencode"},
-        "read-only+": {"~/.opencode/bin/opencode"},
-        "keepenv+": {"AWS_LITELLM_BASE_URL", "AWS_LITELLM_API_KEY"},  # used by opencode.jsonc
-    },
-    "claude": {  # Claude Code, native installer layout
-        "mkdir": {"~/.claude"},
-        "whitelist+": {"~/.claude", "~/.claude.json", "~/.local/bin/claude", "~/.local/share/claude"},
-        "read-only+": {"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"}
+    "opencode": agent(
+        dirs={"~/.config/opencode", "~/.local/share/opencode",
+              "~/.local/state/opencode", "~/.cache/opencode"},
+        ro={"~/.opencode/bin/opencode"},
+        env={"AWS_LITELLM_BASE_URL", "AWS_LITELLM_API_KEY"},  # used by opencode.jsonc
+    ),
+    "claude": agent(  # Claude Code, native installer layout
+        dirs={"~/.claude"},
+        rw={"~/.claude.json"},
+        ro={"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"},
+    ),
+    "codex": agent(
+        dirs={"~/.codex"},
+        ro={"~/.codex/config.toml", "~/.local/bin/codex"},
+    ),
+    "wechat": {  # GUI app: its own private home instead of a project dir
+        "exec": "~/Applications/WeChatLinux_x86_64.AppImage",
+        "appimage": True,
+        "private": "~/sandboxes/wx",  # becomes its home; the rest of yours is invisible
+        "private-etc": "@x11,@tls-ca",
+        "project-dir": None,
+        "read-only": None,  # dev-tool paths; --private replaces home anyway
+        # /run/user: only the display, sound and D-Bus sockets (and X auth files); the rest
+        # stays hidden, e.g. systemd/private, which can start programs outside the sandbox.
+        # A blacklist beats a whitelist, so the base ${RUNUSER} blacklist must go.
+        "blacklist": None,
+        "whitelist": {"${RUNUSER}/bus", "${RUNUSER}/wayland-*", "${RUNUSER}/pipewire-0",
+                      "${RUNUSER}/pulse/native", "${RUNUSER}/.mutter-Xwaylandauth.*",
+                      "${RUNUSER}/xauth_*"},
+        # Session bus through a filter: only these services are reachable. Unfiltered, the
+        # app could ask the systemd user manager (systemd-run --user) to run anything unsandboxed.
+        "dbus-user": "filter",
+        "dbus-user.talk": {"org.freedesktop.Notifications",   # notifications
+                           "org.kde.StatusNotifierWatcher",   # tray icon
+                           "org.freedesktop.portal.Fcitx",    # fcitx input: portal
+                           "org.fcitx.*"},  # fcitx input: org.fcitx.Fcitx, org.fcitx.Fcitx-<display>
+        # Tray icon: the app must claim org.kde.StatusNotifierItem-<pid>-<n>. Firejail only takes
+        # a trailing ".*" wildcard, so this is the narrowest rule that covers it.
+        "dbus-user.own": {"org.kde.*"},
+        "nosound": None, "novideo": None, "no3d": None,  # calls, camera, GPU
+        "keepenv+": {"DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
+                     "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DBUS_SESSION_BUS_ADDRESS",
+                     "QT_IM_MODULE", "GTK_IM_MODULE", "XMODIFIERS", "LANGUAGE"},
     },
 }
 
@@ -66,19 +106,27 @@ def to_args(cfg):
     return args
 
 home, cwd = os.path.expanduser("~"), os.getcwd()
-if len(sys.argv) < 2 or sys.argv[1] not in PROGRAMS:
-    sys.exit(f"usage: fj <program> [args...]   programs: {', '.join(PROGRAMS)}")
-if not cwd.startswith(home + "/"):
-    sys.exit("fj: run from a project dir inside $HOME (not $HOME itself)")
+argv = sys.argv[1:]
+dry_run = argv[:1] == ["--dry-run"]  # only before the program name; later args are the program's
+if dry_run:
+    argv = argv[1:]
+if not argv or argv[0] not in PROGRAMS:
+    sys.exit(f"usage: fj [--dry-run] <program> [args...]   programs: {', '.join(PROGRAMS)}")
+name, args = argv[0], argv[1:]
 
-cfg = merge(BASE, PROGRAMS[sys.argv[1]])
-cfg["whitelist"] = cfg.get("whitelist", set()) | {cwd}
-cfg["read-only"] = cfg.get("read-only", set()) | {f"{cwd}/.git/hooks", f"{cwd}/.git/config"}
+cfg = merge(BASE, PROGRAMS[name])
+if cfg.pop("project-dir", False):
+    if not cwd.startswith(home + "/"):
+        sys.exit("fj: run from a project dir inside $HOME (not $HOME itself)")
+    cfg["whitelist"] = cfg.get("whitelist", set()) | {cwd}
+    cfg["read-only"] = cfg.get("read-only", set()) | {f"{cwd}/.git/hooks", f"{cwd}/.git/config"}
 keep = cfg.pop("keepenv", set())
 env = {k: v for k, v in os.environ.items() if k in keep or k.startswith("LC_")}
+prog = os.path.expanduser(cfg.pop("exec", name))
 
-cmd = [FIREJAIL, "--noprofile", *to_args(cfg), "--", *sys.argv[1:]]
-if os.environ.get("FJ_DRYRUN"):
+cmd = [FIREJAIL, "--noprofile", *to_args(cfg), "--", prog, *args]
+if dry_run:
     print(shlex.join(cmd))
 else:
     os.execve(FIREJAIL, cmd, env)
+
