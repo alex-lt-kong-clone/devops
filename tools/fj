@@ -46,6 +46,10 @@ PROGRAMS = {
         rw={"~/.claude.json"},
         ro={"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"},
     ),
+    "codex": agent(
+        dirs={"~/.codex"},
+        ro={"~/.codex/config.toml", "~/.local/bin/codex"},
+    ),
     "wechat": {  # GUI app: its own private home instead of a project dir
         "exec": "~/Applications/WeChatLinux_x86_64.AppImage",
         "appimage": True,
