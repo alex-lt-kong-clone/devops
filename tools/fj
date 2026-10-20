@@ -31,7 +31,7 @@ BASE = {
 #   "key": value   replace          "key": None    remove
 #   "key+": {...}  add to a set     "key-": {...}  remove from a set
 def agent(dirs, rw=(), ro=(), env=()):
-    dirs, rw, ro, env = set(dirs), set(rw), set(ro), set(env)
+    dirs, rw, ro, env = set(dirs), set(rw), set(ro) | {"~/repos/vcpkg"}, set(env)
     return {"mkdir": dirs, "whitelist+": dirs | rw | ro, "read-only+": ro, "keepenv+": env}
 
 PROGRAMS = {
