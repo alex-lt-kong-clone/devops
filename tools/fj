@@ -46,7 +46,7 @@ PROGRAMS = {
         rw={"~/.claude.json"},
         ro={"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"},
     ),
-    "codex": agent(
+    "codex": agent(  # extra rules: its nested bwrap sandbox
         dirs={"~/.codex"},
         ro={"~/.codex/config.toml", "~/.local/bin/codex"},
     ) | {"protocol+": {"netlink"}, "seccomp": "!mount,!umount2,!pivot_root,!chroot"},
