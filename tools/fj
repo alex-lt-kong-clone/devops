@@ -13,7 +13,6 @@ FIREJAIL = "/usr/bin/firejail"  # absolute: a planted "firejail" on PATH can't r
 #   "keepenv"      env vars passed through (all others dropped)
 #   "project-dir"  share the current dir read-write (with .git hooks/config read-only)
 #   "exec"         command to run instead of the program name
-#   "args"         args put before the user's
 BASE = {
     "quiet": True,  # no firejail status lines in the terminal or in piped output
     "caps.drop": "all", "noroot": True, "nogroups": True, "nonewprivs": True, "seccomp": True,
@@ -50,8 +49,7 @@ PROGRAMS = {
     "codex": agent(  # extra rules: its nested bwrap sandbox
         dirs={"~/.codex"},
         ro={"~/.codex/config.toml", "~/.local/bin/codex"},
-    ) | {"protocol+": {"netlink"}, "seccomp": "!mount,!umount2,!pivot_root,!chroot",
-         "args": ["-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"]},
+    ) | {"protocol+": {"netlink"}, "seccomp": "!mount,!umount2,!pivot_root,!chroot"},
     "wechat": {  # GUI app: its own private home instead of a project dir
         "exec": "~/Applications/WeChatLinux_x86_64.AppImage",
         "appimage": True,
@@ -124,9 +122,9 @@ if cfg.pop("project-dir", False):
     cfg["read-only"] = cfg.get("read-only", set()) | {f"{cwd}/.git/hooks", f"{cwd}/.git/config"}
 keep = cfg.pop("keepenv", set())
 env = {k: v for k, v in os.environ.items() if k in keep or k.startswith("LC_")}
-prog = [os.path.expanduser(cfg.pop("exec", name)), *cfg.pop("args", ())]
+prog = os.path.expanduser(cfg.pop("exec", name))
 
-cmd = [FIREJAIL, "--noprofile", *to_args(cfg), "--", *prog, *args]
+cmd = [FIREJAIL, "--noprofile", *to_args(cfg), "--", prog, *args]
 if dry_run:
     print(shlex.join(cmd))
 else:
