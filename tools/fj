@@ -16,7 +16,7 @@ FIREJAIL = "/usr/bin/firejail"  # absolute: a planted "firejail" on PATH can't r
 BASE = {
     "quiet": True,  # no firejail status lines in the terminal or in piped output
     "caps.drop": "all", "noroot": True, "nogroups": True, "nonewprivs": True, "seccomp": True,
-    "protocol": "unix,inet,inet6",  # socket types only; any destination is reachable
+    "protocol": {"unix", "inet", "inet6"},  # socket types only; any destination is reachable
     "private-tmp": True, "private-dev": True, "disable-mnt": True,
     "nosound": True, "no3d": True, "novideo": True, "nou2f": True,
     "dbus-user": "none", "dbus-system": "none",
@@ -49,7 +49,7 @@ PROGRAMS = {
     "codex": agent(
         dirs={"~/.codex"},
         ro={"~/.codex/config.toml", "~/.local/bin/codex"},
-    ),
+    ) | {"protocol+": {"netlink"}, "seccomp": "!mount,!umount2,!pivot_root,!chroot"},
     "wechat": {  # GUI app: its own private home instead of a project dir
         "exec": "~/Applications/WeChatLinux_x86_64.AppImage",
         "appimage": True,
