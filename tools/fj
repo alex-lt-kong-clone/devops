@@ -50,7 +50,8 @@ PROGRAMS = {
     "codex": agent(  # extra rules: its nested bwrap sandbox
         dirs={"~/.codex"},
         ro={"~/.codex/config.toml", "~/.local/bin/codex"},
-    ) | {"protocol+": {"netlink"}, "seccomp": "!mount,!umount2,!pivot_root,!chroot",
+    ) | {"seccomp": "!mount,!umount2,!pivot_root,!chroot",
+         # no netns: bwrap needs no netlink, which would expose nf_tables
          "args": ["-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"]},
     "wechat": {  # GUI app: its own private home instead of a project dir
         "exec": "~/Applications/WeChatLinux_x86_64.AppImage",
