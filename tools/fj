@@ -30,26 +30,26 @@ BASE = {
 # Children: a list of layers, merged over BASE in order.
 #   "key": value   replace          "key": None    remove
 #   "key+": {...}  add to a set     "key-": {...}  remove from a set
-def agent(dirs, rw=(), ro=(), env=()):
-    dirs, rw, ro, env = set(dirs), set(rw), set(ro) | {"~/repos/vcpkg"}, set(env)
-    return {"mkdir": dirs, "whitelist+": dirs | rw | ro, "read-only+": ro, "keepenv+": env}
+def agent(mkdir, rw=(), ro=(), env=()):
+    mkdir, rw, ro, env = set(mkdir), set(rw), set(ro) | {"~/repos/vcpkg"}, set(env)
+    return {"mkdir": mkdir, "whitelist+": mkdir | rw | ro, "read-only+": ro, "keepenv+": env}
 
 NESTED_BWRAP = {"protocol+": {"netlink"}, "seccomp": "!mount,!umount2,!pivot_root,!chroot"}
 
 PROGRAMS = {
     "opencode": [agent(
-        dirs={"~/.config/opencode", "~/.local/share/opencode",
-              "~/.local/state/opencode", "~/.cache/opencode"},
+        mkdir={"~/.config/opencode", "~/.local/share/opencode",
+               "~/.local/state/opencode", "~/.cache/opencode"},
         ro={"~/.opencode/bin/opencode"},
         env={"AWS_LITELLM_BASE_URL", "AWS_LITELLM_API_KEY"},  # used by opencode.jsonc
     )],
     "claude": [agent(  # Claude Code, native installer layout
-        dirs={"~/.claude"},
+        mkdir={"~/.claude"},
         rw={"~/.claude.json"},
         ro={"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"},
     ), NESTED_BWRAP, {"allow-bwrap": True}],  # else firejail swaps in fbwrap
     "codex": [agent(
-        dirs={"~/.codex"},
+        mkdir={"~/.codex"},
         ro={"~/.codex/config.toml", "~/.local/bin/codex"},
     ), NESTED_BWRAP],
     "wechat": [{  # GUI app: its own private home instead of a project dir
