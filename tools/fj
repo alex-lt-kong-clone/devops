@@ -3,7 +3,7 @@
 Usage: cd ~/some/project && fj [--dry-run] <program> [args...]
        --dry-run prints the firejail command instead of running it
 """
-import os, shlex, sys
+import functools, os, shlex, sys
 
 FIREJAIL = "/usr/bin/firejail"  # absolute: a planted "firejail" on PATH can't replace it
 
@@ -16,7 +16,7 @@ FIREJAIL = "/usr/bin/firejail"  # absolute: a planted "firejail" on PATH can't r
 BASE = {
     "quiet": True,  # no firejail status lines in the terminal or in piped output
     "caps.drop": "all", "noroot": True, "nogroups": True, "nonewprivs": True, "seccomp": True,
-    "protocol": "unix,inet,inet6",  # socket types only; any destination is reachable
+    "protocol": {"unix", "inet", "inet6"},  # socket types only; any destination is reachable
     "private-tmp": True, "private-dev": True, "disable-mnt": True,
     "nosound": True, "no3d": True, "novideo": True, "nou2f": True,
     "dbus-user": "none", "dbus-system": "none",
@@ -27,30 +27,33 @@ BASE = {
     "project-dir": True,
 }
 
-# Children: only what differs from BASE.
+# Children: a list of layers, merged over BASE in order.
 #   "key": value   replace          "key": None    remove
 #   "key+": {...}  add to a set     "key-": {...}  remove from a set
-def agent(dirs, rw=(), ro=(), env=()):
-    dirs, rw, ro, env = set(dirs), set(rw), set(ro) | {"~/repos/vcpkg"}, set(env)
-    return {"mkdir": dirs, "whitelist+": dirs | rw | ro, "read-only+": ro, "keepenv+": env}
+AGENT_RO = {"~/repos/vcpkg"}
+NESTED_BWRAP = {"protocol+": {"netlink"}, "seccomp": "!mount,!umount2,!pivot_root,!chroot"}
+
+def agent(mkdir, rw=(), ro=(), env=()):
+    mkdir, rw, ro, env = set(mkdir), set(rw), set(ro) | AGENT_RO, set(env)
+    return {"mkdir": mkdir, "whitelist+": mkdir | rw | ro, "read-only+": ro, "keepenv+": env}
 
 PROGRAMS = {
-    "opencode": agent(
-        dirs={"~/.config/opencode", "~/.local/share/opencode",
-              "~/.local/state/opencode", "~/.cache/opencode"},
+    "opencode": [agent(
+        mkdir={"~/.config/opencode", "~/.local/share/opencode",
+               "~/.local/state/opencode", "~/.cache/opencode"},
         ro={"~/.opencode/bin/opencode"},
         env={"AWS_LITELLM_BASE_URL", "AWS_LITELLM_API_KEY"},  # used by opencode.jsonc
-    ),
-    "claude": agent(  # Claude Code, native installer layout
-        dirs={"~/.claude"},
+    )],
+    "claude": [agent(  # Claude Code, native installer layout
+        mkdir={"~/.claude"},
         rw={"~/.claude.json"},
         ro={"~/.claude/settings.json", "~/.local/bin/claude", "~/.local/share/claude"},
-    ),
-    "codex": agent(
-        dirs={"~/.codex"},
+    ), NESTED_BWRAP, {"allow-bwrap": True}],  # else firejail swaps in fbwrap
+    "codex": [agent(
+        mkdir={"~/.codex"},
         ro={"~/.codex/config.toml", "~/.local/bin/codex"},
-    ),
-    "wechat": {  # GUI app: its own private home instead of a project dir
+    ), NESTED_BWRAP],
+    "wechat": [{  # GUI app: its own private home instead of a project dir
         "exec": "~/Applications/WeChatLinux_x86_64.AppImage",
         "appimage": True,
         "private": "~/sandboxes/wx",  # becomes its home; the rest of yours is invisible
@@ -78,7 +81,7 @@ PROGRAMS = {
         "keepenv+": {"DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
                      "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DBUS_SESSION_BUS_ADDRESS",
                      "QT_IM_MODULE", "GTK_IM_MODULE", "XMODIFIERS", "LANGUAGE"},
-    },
+    }],
 }
 
 def merge(base, child):
@@ -114,7 +117,7 @@ if not argv or argv[0] not in PROGRAMS:
     sys.exit(f"usage: fj [--dry-run] <program> [args...]   programs: {', '.join(PROGRAMS)}")
 name, args = argv[0], argv[1:]
 
-cfg = merge(BASE, PROGRAMS[name])
+cfg = functools.reduce(merge, PROGRAMS[name], BASE)
 if cfg.pop("project-dir", False):
     if not cwd.startswith(home + "/"):
         sys.exit("fj: run from a project dir inside $HOME (not $HOME itself)")
