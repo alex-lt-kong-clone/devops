@@ -30,11 +30,12 @@ BASE = {
 # Children: a list of layers, merged over BASE in order.
 #   "key": value   replace          "key": None    remove
 #   "key+": {...}  add to a set     "key-": {...}  remove from a set
-def agent(mkdir, rw=(), ro=(), env=()):
-    mkdir, rw, ro, env = set(mkdir), set(rw), set(ro) | {"~/repos/vcpkg"}, set(env)
-    return {"mkdir": mkdir, "whitelist+": mkdir | rw | ro, "read-only+": ro, "keepenv+": env}
-
+AGENT_RO = {"~/repos/vcpkg"}
 NESTED_BWRAP = {"protocol+": {"netlink"}, "seccomp": "!mount,!umount2,!pivot_root,!chroot"}
+
+def agent(mkdir, rw=(), ro=(), env=()):
+    mkdir, rw, ro, env = set(mkdir), set(rw), set(ro) | AGENT_RO, set(env)
+    return {"mkdir": mkdir, "whitelist+": mkdir | rw | ro, "read-only+": ro, "keepenv+": env}
 
 PROGRAMS = {
     "opencode": [agent(
